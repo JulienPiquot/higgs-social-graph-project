@@ -24,7 +24,7 @@ object HiggsSocialGraphProject {
     /******************************************/
     /* comptage de l'effectif heure par heure */
     /******************************************/
-    val hist: RDD[(Long, Int)] = activityG.edges.map(e => 3600 * (e.attr._1 / 3600)).groupBy(e => e).map(g => (g._1, g._2.size)).sortBy(e => e._1);
+    val hist: RDD[(Long, Int)] = activityG.edges.map(e => 3600 * (e.attr._1 / 3600)).groupBy(e => e).map(g => (g._1, g._2.size)).sortBy(e => e._1)
     // verification : le resultat du reduce = le nombre d'arêtes
     hist.map(e => e._2).reduce((e1, e2) => e1 + e2)
     val cHist = hist.collect()
@@ -85,6 +85,15 @@ object HiggsSocialGraphProject {
     val writer = new PrintWriter("higgs-social_network-pr.gexf")
     XML.write(writer, gefx, "utf-8", xmlDecl = true, doctype = null)
     writer.close()
+
+    /*************************************************************************************************/
+    /* Utiliser la fonction d'aggrégation afin de trouver le timestamp d'activation de chaque sommet */
+    /*************************************************************************************************/
+    val aggTimestamp: VertexRDD[Long] = activityG.aggregateMessages[Long](triplet => {
+      triplet.sendToSrc(triplet.attr._1)
+    }, (a: Long, b: Long) => if (a > b) b else a, TripletFields.EdgeOnly)
+    val activityHist = aggTimestamp.map(e => 3600 * (e._2 / 3600)).groupBy(e => e).map(g => (g._1, g._2.size)).sortBy(e => e._1)
+    printHist(activityHist.collect().map{var acc: Long = 0; v => {acc += v._2; (v._1, acc)}}, "activity_over_time.txt")
 
     sc.stop()
   }
