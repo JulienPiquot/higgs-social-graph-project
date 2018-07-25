@@ -95,7 +95,44 @@ object HiggsSocialGraphProject {
     val activityHist = aggTimestamp.map(e => 3600 * (e._2 / 3600)).groupBy(e => e).map(g => (g._1, g._2.size)).sortBy(e => e._1)
     printHist(activityHist.collect().map{var acc: Long = 0; v => {acc += v._2; (v._1, acc)}}, "activity_over_time.txt")
 
+
+    /*************************************************************************************************************************/
+    /* Définir une fenetre temporelle grandissante et calculer la longueur de la cascade la plus grande sur les sous graphes */
+    /*************************************************************************************************************************/
+    val minTs = activityG.edges.map(e => 3600 * (e.attr._1 / 3600)).min()
+    val maxTs = activityG.edges.map(e => 3600 * (e.attr._1 / 3600)).max()
+    val upperRange = (minTs + 3600 to maxTs by 3600).toArray
+    val lesserRange = (1 to upperRange.length).map(_ => minTs)
+    val allCascades = lesserRange.zip(upperRange).map(r => activityG.subgraph(v => v.attr._1 >= r._1 && v.attr._1 <= r._2)).map(g => maxCascade(g))
+    printHist(upperRange.map(v => v - 3600).zip(allCascades), "cascade_over_time.txt")
+
     sc.stop()
+  }
+
+  /****************************************************************/
+  /* Utiliser l'API Pregel pour propager la longueur des cascades */
+  /****************************************************************/
+  def maxCascade(g: Graph[Null, (Long, String)]): Int = {
+    val cascadeLenghtG = g.mapVertices((id, _) => (0, Long.MaxValue)).reverse.pregel((1, Long.MaxValue), Int.MaxValue, EdgeDirection.Out)(
+      (id, v, m) => m,
+      triplet => {
+        // selection de l'arête qui a le timestamp le plus faible
+        if (triplet.attr._1 < triplet.dstAttr._2) {
+          Iterator((triplet.dstId, (triplet.srcAttr._1 + 1, triplet.attr._1)))
+        } else {
+          Iterator.empty
+        }
+      },
+      // fusion des messages : selection du message qui a le timestamp le plus faible
+      (m1, m2) => {
+        if (m1._2 > m2._1) {
+          m2
+        } else {
+          m1
+        }
+      }
+    )
+    cascadeLenghtG.vertices.sortBy(v => v._2._1, false).first()._2._1
   }
 
   def effectifDegres(v: VertexRDD[Int]) = {
